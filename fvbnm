@@ -1,0 +1,122 @@
+import React, { useState } from "react";
+import ReactFlow, {
+  Background,
+  Controls,
+  MiniMap,
+  addEdge,
+  useNodesState,
+  useEdgesState,
+  MarkerType,
+} from "reactflow";
+import "reactflow/dist/style.css";
+
+// Node color mapping
+const nodeColors = {
+  Rule: "#e74c3c",
+  Unit: "#27ae60",
+  Product: "#e67e22",
+  App: "#2980b9",
+};
+
+// Child structure
+const expansionMap = {
+  "Rule-1": Array.from({ length: 5 }, (_, i) => ({
+    id: `Unit-${i + 1}`,
+    type: "Unit",
+    label: `Unit-${i + 1}`,
+    data: { tooltip: `Unit ${i + 1} under Rule-1` },
+  })),
+  "Unit-1": [
+    { id: "Product-A", type: "Product", label: "Product-A", data: { tooltip: "Shared product" } },
+    { id: "App-A", type: "App", label: "App-A", data: { tooltip: "App-A connected to Unit-1" } },
+  ],
+  "Product-A": [
+    { id: "App-Shared", type: "App", label: "App-Shared", data: { tooltip: "Shared App Node" } },
+  ]
+};
+
+// Node builder
+const createNode = (id, type, label, position, data) => ({
+  id,
+  position,
+  type: "default",
+  data: {
+    label: <div title={data.tooltip}>{label}</div>,
+    ...data
+  },
+  style: {
+    background: nodeColors[type] || "#ccc",
+    color: "#fff",
+    padding: 10,
+    borderRadius: 5,
+    width: 120,
+    textAlign: "center",
+    border: "1px solid #555"
+  }
+});
+
+const TraceabilityGraph = () => {
+  const [nodes, setNodes, onNodesChange] = useNodesState([
+    createNode("Rule-1", "Rule", "Rule-1", { x: 300, y: 100 }, { tooltip: "Main Rule Node" })
+  ]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+  const [expanded, setExpanded] = useState(new Set());
+
+  const handleNodeClick = (event, node) => {
+    const id = node.id;
+    if (expanded.has(id)) return;
+
+    const children = expansionMap[id] || [];
+    const yOffset = 150;
+    const parentX = node.position.x;
+    const parentY = node.position.y;
+
+    const newNodes = [];
+    const newEdges = [];
+
+    children.forEach((child, index) => {
+      if (!nodes.find((n) => n.id === child.id)) {
+        newNodes.push(
+          createNode(
+            child.id,
+            child.type,
+            child.label,
+            { x: parentX + index * 130 - 200, y: parentY + yOffset },
+            child.data
+          )
+        );
+      }
+
+      newEdges.push({
+        id: `e-${id}-${child.id}`,
+        source: id,
+        target: child.id,
+        markerEnd: { type: MarkerType.ArrowClosed },
+        animated: true,
+        style: { stroke: "#555" }
+      });
+    });
+
+    setNodes((prev) => [...prev, ...newNodes]);
+    setEdges((prev) => addEdge(newEdges, prev));
+    setExpanded((prev) => new Set(prev).add(id));
+  };
+
+  return (
+    <ReactFlow
+      nodes={nodes}
+      edges={edges}
+      onNodesChange={onNodesChange}
+      onEdgesChange={onEdgesChange}
+      onNodeClick={handleNodeClick}
+      fitView
+      fitViewOptions={{ padding: 0.3 }}
+    >
+      <MiniMap />
+      <Controls />
+      <Background />
+    </ReactFlow>
+  );
+};
+
+export default TraceabilityGraph;
