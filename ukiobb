@@ -1,0 +1,170 @@
+import React, { useState } from "react";
+import { Graph } from "react-d3-graph";
+
+// Color map by type
+const nodeColors = {
+  Rule: "red",
+  Unit: "green",
+  Product: "orange",
+  App: "blue"
+};
+
+// Expand map
+const expansionMap = {
+  "Rule-1": Array.from({ length: 5 }, (_, i) => ({
+    id: `Unit-${i + 1}`,
+    type: "Unit",
+    description: `Unit ${i + 1} under Rule-1`
+  })),
+  "Unit-1": [
+    { id: "Product-A", type: "Product", description: "Shared product" },
+    { id: "App-A", type: "App", description: "App connected to Unit-1" }
+  ],
+  "Unit-2": [
+    { id: "Product-A", type: "Product", description: "Shared product" },
+    { id: "App-B", type: "App", description: "App for Unit-2" }
+  ],
+  "Unit-3": [
+    { id: "Product-C", type: "Product", description: "Unique Product C" },
+    { id: "App-C", type: "App", description: "Linked App-C" }
+  ],
+  "Product-A": [
+    { id: "App-Shared", type: "App", description: "App shared by Product-A" }
+  ]
+};
+
+// Initial centered root node
+const initialData = {
+  nodes: [
+    {
+      id: "Rule-1",
+      type: "Rule",
+      color: nodeColors["Rule"],
+      description: "Main Rule Node",
+      x: 600,
+      y: 400
+    }
+  ],
+  links: []
+};
+
+const GraphViewer = () => {
+  const [data, setData] = useState(initialData);
+  const [expanded, setExpanded] = useState(new Set());
+  const [selectedNode, setSelectedNode] = useState(null);
+
+  const handleClickNode = (nodeId) => {
+    setSelectedNode(data.nodes.find((n) => n.id === nodeId));
+    if (expanded.has(nodeId)) {
+      collapseNode(nodeId);
+    } else {
+      expandNode(nodeId);
+    }
+  };
+
+  const expandNode = (nodeId) => {
+    const children = expansionMap[nodeId] || [];
+
+    const newNodes = children
+      .filter((child) => !data.nodes.some((n) => n.id === child.id))
+      .map((child) => ({
+        id: child.id,
+        type: child.type,
+        color: nodeColors[child.type] || "gray",
+        description: child.description
+      }));
+
+    const newLinks = children.map((child) => ({
+      source: nodeId,
+      target: child.id
+    }));
+
+    setData((prev) => ({
+      nodes: [...prev.nodes, ...newNodes],
+      links: [...prev.links, ...newLinks]
+    }));
+    setExpanded((prev) => new Set(prev).add(nodeId));
+  };
+
+  const collapseNode = (nodeId) => {
+    const toRemove = new Set();
+    const queue = [nodeId];
+
+    while (queue.length > 0) {
+      const current = queue.shift();
+      const children = data.links
+        .filter((link) => link.source === current)
+        .map((link) => link.target);
+
+      for (const child of children) {
+        queue.push(child);
+        toRemove.add(child);
+      }
+    }
+
+    const newNodes = data.nodes.filter((n) => !toRemove.has(n.id));
+    const newLinks = data.links.filter(
+      (link) => !toRemove.has(link.source) && !toRemove.has(link.target)
+    );
+
+    const newExpanded = new Set(expanded);
+    toRemove.forEach((id) => newExpanded.delete(id));
+    newExpanded.delete(nodeId);
+
+    setData({ nodes: newNodes, links: newLinks });
+    setExpanded(newExpanded);
+  };
+
+  const config = {
+    height: 800,
+    width: 1200,
+    directed: true,
+    nodeHighlightBehavior: true,
+    staticGraphWithDragAndDrop: true,
+    panAndZoom: true,
+    initialZoom: 1.2,
+    d3: {
+      gravity: -200,
+      linkLength: 250,
+      alphaTarget: 0.05
+    },
+    node: {
+      size: 500,
+      labelProperty: "id",
+      fontSize: 14,
+      highlightStrokeColor: "black"
+    },
+    link: {
+      highlightColor: "lightblue"
+    }
+  };
+
+  return (
+    <div style={{ display: "flex", gap: "20px" }}>
+      <div style={{ flex: 3 }}>
+        <h2>Interactive Traceability Graph</h2>
+        <Graph
+          id="traceability-graph"
+          data={data}
+          config={config}
+          onClickNode={handleClickNode}
+          nodeTooltip={(node) => node.description || node.id}
+        />
+      </div>
+      <div style={{ flex: 1, padding: "1rem", border: "1px solid #ccc" }}>
+        <h3>Node Details</h3>
+        {selectedNode ? (
+          <div>
+            <p><strong>ID:</strong> {selectedNode.id}</p>
+            <p><strong>Type:</strong> {selectedNode.type}</p>
+            <p><strong>Description:</strong> {selectedNode.description}</p>
+          </div>
+        ) : (
+          <p>Click a node to see details.</p>
+        )}
+      </div>
+    </div>
+  );
+};
+
+export default GraphViewer;
