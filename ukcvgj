@@ -1,0 +1,217 @@
+import React, { useEffect, useRef, useState } from "react";
+import { DataSet, Network, Node, Edge } from "vis-network/standalone";
+
+type NodeType = "SOO" | "Unit" | "Product" | "Rule";
+
+interface TraceNode {
+  id: string;
+  label: string;
+  title: string;
+  type: NodeType;
+}
+
+const nodeDetails: Record<string, TraceNode> = {
+  A: { id: "A", label: "🏢 SOO: A", title: "SOO | Owner: John | ID: A1", type: "SOO" },
+  B: { id: "B", label: "🏢 SOO: B", title: "SOO | Owner: Emma | ID: B1", type: "SOO" },
+  C: { id: "C", label: "🏢 SOO: C", title: "SOO | Owner: Raj | ID: C1", type: "SOO" },
+  "1": { id: "1", label: "🏭 Downstream 1", title: "Unit | Head: Alice", type: "Unit" },
+  "2": { id: "2", label: "🏭 Downstream 2", title: "Unit | Head: Bob", type: "Unit" },
+  "1.1": { id: "1.1", label: "🏗️ Unit 1", title: "Plant | ID: U1", type: "Unit" },
+  "1.2": { id: "1.2", label: "🏗️ Unit 2", title: "Packaging | Shift: Night", type: "Unit" },
+  "2.1": { id: "2.1", label: "📦 Product A", title: "SKU: P123 | Launch: 2024", type: "Product" },
+  "1.1.1": { id: "1.1.1", label: "⚖️ Rule 1", title: "Compliance | Status: Approved", type: "Rule" },
+  "1.2.1": { id: "1.2.1", label: "✅ Rule 2", title: "Quality | Metric: pH", type: "Rule" },
+  "1.2.2": { id: "1.2.2", label: "🌿 Rule 3", title: "Environmental | Limit: 50ppm", type: "Rule" }
+};
+
+const allLevels: Record<string, string[]> = {
+  A: ["1"],
+  B: ["2"],
+  C: [],
+  "1": ["1.1", "1.2"],
+  "2": ["2.1"],
+  "1.1": ["1.1.1"],
+  "1.2": ["1.2.1", "1.2.2"]
+};
+
+const typeColors: Record<NodeType, string> = {
+  SOO: "#e74c3c",
+  Unit: "#3498db",
+  Product: "#2ecc71",
+  Rule: "#f39c12"
+};
+
+const App: React.FC = () => {
+  const networkRef = useRef<HTMLDivElement>(null);
+  const nodes = useRef(new DataSet<Node>());
+  const edges = useRef(new DataSet<Edge>());
+  const expanded = useRef(new Set<string>());
+  const networkInstance = useRef<Network | null>(null);
+  const currentLayout = useRef<"UD" | "LR">("UD");
+
+  const [maxLevel, setMaxLevel] = useState(4);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [filterText, setFilterText] = useState("");
+
+  const getNodeLevel = (id: string) => id.split(".").length;
+
+  const addStyledNode = (id: string) => {
+    const detail = nodeDetails[id];
+    if (!detail) return;
+    nodes.current.add({
+      id,
+      label: detail.label,
+      title: detail.title,
+      color: {
+        background: typeColors[detail.type],
+        border: "#333",
+        highlight: { background: "#ffff99", border: "#555" }
+      }
+    });
+  };
+
+  const expandNode = (id: string, level = 1) => {
+    if (level >= maxLevel) return;
+    const children = allLevels[id] || [];
+    for (const childId of children) {
+      if (!nodes.current.get(childId)) addStyledNode(childId);
+      if (!edges.current.get({ filter: e => e.from === id && e.to === childId }).length) {
+        edges.current.add({ from: id, to: childId });
+      }
+    }
+    expanded.current.add(id);
+    for (const child of children) expandNode(child, level + 1);
+  };
+
+  const collapseNode = (id: string) => {
+    const children = allLevels[id] || [];
+    for (const childId of children) {
+      collapseNode(childId);
+      nodes.current.remove(childId);
+      edges.current.remove({ filter: e => e.from === id && e.to === childId });
+    }
+    expanded.current.delete(id);
+  };
+
+  const drawNetwork = () => {
+    if (!networkRef.current) return;
+    networkInstance.current = new Network(networkRef.current, {
+      nodes: nodes.current,
+      edges: edges.current
+    }, {
+      layout: {
+        hierarchical: {
+          direction: currentLayout.current,
+          sortMethod: "directed",
+          levelSeparation: 100,
+          nodeSpacing: 200
+        }
+      },
+      nodes: { shape: "box", font: { size: 16 } },
+      edges: { arrows: "to", smooth: { type: "cubicBezier" } },
+      interaction: { hover: true },
+      physics: false
+    });
+
+    networkInstance.current.on("click", (params) => {
+      const id = params.nodes[0];
+      if (!id) return;
+      expanded.current.has(id)
+        ? collapseNode(id)
+        : expandNode(id, getNodeLevel(id));
+    });
+  };
+
+  const resetGraph = () => {
+    nodes.current.clear();
+    edges.current.clear();
+    expanded.current.clear();
+    ["A", "B", "C"].forEach(addStyledNode);
+    drawNetwork();
+  };
+
+  const expandAll = () => Object.keys(allLevels).forEach(id => expandNode(id));
+
+  const toggleLayout = () => {
+    currentLayout.current = currentLayout.current === "UD" ? "LR" : "UD";
+    drawNetwork();
+  };
+
+  const exportPNG = () => {
+    const canvas = networkRef.current?.querySelector("canvas");
+    if (!canvas) return;
+    const link = document.createElement("a");
+    link.href = canvas.toDataURL("image/png");
+    link.download = "traceability_tree.png";
+    link.click();
+  };
+
+  const handleSearch = () => {
+    const match = nodes.current.get().find(n =>
+      typeof n.label === "string" &&
+      (n.id === searchTerm || n.label.toLowerCase().includes(searchTerm.toLowerCase()))
+    );
+    if (match && networkInstance.current) {
+      networkInstance.current.selectNodes([match.id as string]);
+      networkInstance.current.focus(match.id as string, { scale: 1.5, animation: true });
+    } else {
+      alert("Node not found");
+    }
+  };
+
+  const handleFilter = () => {
+    const matched = nodes.current.get().filter(n =>
+      typeof n.label === "string" && n.label.toLowerCase().includes(filterText.toLowerCase())
+    );
+    matched.forEach(m => expandNode(m.id as string));
+    const children = matched.flatMap(m => allLevels[m.id as string] || []);
+    children.forEach(addStyledNode);
+    const visibleEdges = edges.current.get().filter(e =>
+      matched.some(m => m.id === e.from || m.id === e.to)
+    );
+    networkInstance.current?.setData({
+      nodes: new DataSet<Node>(matched.concat(children.map(id => nodes.current.get(id)).filter(Boolean))),
+      edges: new DataSet<Edge>(visibleEdges)
+    });
+  };
+
+  const clearFilter = () => {
+    drawNetwork();
+    setFilterText("");
+  };
+
+  useEffect(() => {
+    resetGraph();
+  }, []);
+
+  return (
+    <div>
+      <div style={{ padding: "10px", background: "#eee", display: "flex", flexWrap: "wrap", gap: "10px" }}>
+        <button onClick={expandAll}>Expand All</button>
+        <button onClick={resetGraph}>Reset</button>
+        <button onClick={toggleLayout}>Toggle Layout</button>
+        <button onClick={exportPNG}>Export PNG</button>
+        <label>
+          Max Levels:
+          <select value={maxLevel} onChange={(e) => setMaxLevel(+e.target.value)}>
+            {[1, 2, 3, 4, 5].map(lvl => <option key={lvl} value={lvl}>{lvl}</option>)}
+          </select>
+        </label>
+        <input placeholder="Search..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
+        <button onClick={handleSearch}>Search</button>
+        <input placeholder="Filter..." value={filterText} onChange={e => setFilterText(e.target.value)} />
+        <button onClick={handleFilter}>Filter</button>
+        <button onClick={clearFilter}>Clear Filter</button>
+      </div>
+      <div style={{ padding: "10px", display: "flex", gap: "15px", background: '#fafafa', borderBottom: '1px solid #ccc' }}>
+        <div><span style={{ background: '#e74c3c', padding: '4px 8px', borderRadius: '4px' }} /> SOO</div>
+        <div><span style={{ background: '#3498db', padding: '4px 8px', borderRadius: '4px' }} /> Unit</div>
+        <div><span style={{ background: '#2ecc71', padding: '4px 8px', borderRadius: '4px' }} /> Product</div>
+        <div><span style={{ background: '#f39c12', padding: '4px 8px', borderRadius: '4px' }} /> Rule</div>
+      </div>
+      <div ref={networkRef} style={{ height: "85vh" }} />
+    </div>
+  );
+};
+
+export default App;
